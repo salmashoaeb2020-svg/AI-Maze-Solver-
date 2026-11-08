@@ -1,209 +1,268 @@
 import streamlit as st
 import numpy as np
 import time
-import sys
-import os
+import random
+import heapq
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_absolute_error
+import matplotlib.pyplot as plt
 
-# إضافة مسار المشروع الحالي لبيئة بايثون
-ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
-if ROOT_DIR not in sys.path:
-    sys.path.append(ROOT_DIR)
+# ==================== 1. MAZE GENERATOR & UTILS ====================
+class MazeGenerator:
+    def __init__(self, width=15, height=15):
+        self.width = width
+        self.height = height
+        self.start = (0, 0)
+        self.goal = (width - 1, height - 1)
 
-from maze.maze_generator import MazeGenerator
-from algorithms.bfs import bfs
-from algorithms.ucs import ucs
-from algorithms.astar import astar
-from algorithms.weighted_astar import weighted_astar
-from visualization.visualization import render_maze_grid
-from machine_learning.ml_model import MazeHeuristicModel
+    def generate_random_maze(self, wall_probability=0.25):
+        grid = np.zeros((self.height, self.width), dtype=int)
+        for r in range(self.height):
+            for c in range(self.width):
+                if (r, c) == self.start or (r, c) == self.goal:
+                    continue
+                if random.random() < wall_probability:
+                    grid[r][c] = 1  # Wall
+        grid[self.start[0]][self.start[1]] = 0
+        grid[self.goal[0]][self.goal[1]] = 0
+        return grid
 
-# Page Configuration
-st.set_page_config(
-    page_title="AI Maze Solver - University Project",
-    page_icon="🤖",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+def manhattan_distance(pos, goal):
+    return abs(pos[0] - goal[0]) + abs(pos[1] - goal[1])
 
-# Custom Styling (Dark blue & purple theme)
+# ==================== 2. SEARCH ALGORITHMS ====================
+def get_neighbors(grid, node):
+    r, c = node
+    neighbors = []
+    for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+        nr, nc = r + dr, c + dc
+        if 0 <= nr < grid.shape[0] and 0 <= nc < grid.shape[1]:
+            if grid[nr][nc] != 1:  # Not a wall
+                neighbors.append((nr, nc))
+    return neighbors
+
+def bfs(grid, start, goal):
+    queue = [[start]]
+    explored = set([start])
+    while queue:
+        path = queue.pop(0)
+        node = path[-1]
+        if node == goal:
+            return {"success": True, "path": path, "explored_nodes": list(explored), "path_cost": len(path) - 1}
+        for neighbor in get_neighbors(grid, node):
+            if neighbor not in explored:
+                explored.add(neighbor)
+                queue.append(path + [neighbor])
+    return {"success": False, "path": [], "explored_nodes": list(explored), "path_cost": float('inf')}
+
+def ucs(grid, start, goal):
+    queue = [(0, [start])]
+    explored = set()
+    while queue:
+        cost, path = heapq.heappop(queue)
+        node = path[-1]
+        if node == goal:
+            return {"success": True, "path": path, "explored_nodes": list(explored), "path_cost": cost}
+        if node not in explored:
+            explored.add(node)
+            for neighbor in get_neighbors(grid, node):
+                if neighbor not in explored:
+                    heapq.heappush(queue, (cost + 1, path + [neighbor]))
+    return {"success": False, "path": [], "explored_nodes": list(explored), "path_cost": float('inf')}
+
+def astar(grid, start, goal):
+    queue = [(manhattan_distance(start, goal), 0, [start])]
+    explored = set()
+    while queue:
+        f, cost, path = heapq.heappop(queue)
+        node = path[-1]
+        if node == goal:
+            return {"success": True, "path": path, "explored_nodes": list(explored), "path_cost": cost}
+        if node not in explored:
+            explored.add(node)
+            for neighbor in get_neighbors(grid, node):
+                if neighbor not in explored:
+                    g = cost + 1
+                    h = manhattan_distance(neighbor, goal)
+                    heapq.heappush(queue, (g + h, g, path + [neighbor]))
+    return {"success": False, "path": [], "explored_nodes": list(explored), "path_cost": float('inf')}
+
+def weighted_astar(grid, start, goal, weight=1.5):
+    queue = [(weight * manhattan_distance(start, goal), 0, [start])]
+    explored = set()
+    while queue:
+        f, cost, path = heapq.heappop(queue)
+        node = path[-1]
+        if node == goal:
+            return {"success": True, "path": path, "explored_nodes": list(explored), "path_cost": cost}
+        if node not in explored:
+            explored.add(node)
+            for neighbor in get_neighbors(grid, node):
+                if neighbor not in explored:
+                    g = cost + 1
+                    h = manhattan_distance(neighbor, goal)
+                    heapq.heappush(queue, (g + weight * h, g, path + [neighbor]))
+    return {"success": False, "path": [], "explored_nodes": list(explored), "path_cost": float('inf')}
+
+# ==================== 3. VISUALIZATION ====================
+def render_maze_grid(grid, path=None, explored=None):
+    fig, ax = plt.subplots(figsize=(6, 6))
+    cmap_grid = np.array(grid, dtype=float)
+    
+    if explored:
+        for r, c in explored:
+            if grid[r][c] == 0:
+                cmap_grid[r][c] = 0.5  # Explored color
+    if path:
+        for r, c in path:
+            cmap_grid[r][c] = 0.3  # Path color
+            
+    # Start and Goal markers
+    start_pos = (0, 0)
+    goal_pos = (grid.shape[1] - 1, grid.shape[0] - 1)
+    cmap_grid[start_pos[1]][start_pos[0]] = 0.2
+    cmap_grid[goal_pos[1]][goal_pos[0]] = 0.8
+
+    ax.imshow(cmap_grid, cmap="Accent")
+    ax.set_xticks([])
+    ax.set_yticks([])
+    return fig
+
+# ==================== 4. MACHINE LEARNING MODEL ====================
+class MazeHeuristicModel:
+    def __init__(self):
+        self.model = DecisionTreeRegressor(random_state=42)
+        self.mae = 0.0
+
+    def train(self, num_mazes=5, width=10, height=10):
+        X, y = [], []
+        for _ in range(num_mazes):
+            gen = MazeGenerator(width=width, height=height)
+            grid = gen.generate_random_maze(wall_probability=0.2)
+            result = bfs(grid, gen.start, gen.goal)
+            if not result["success"]:
+                continue
+            path = result["path"]
+            path_length = len(path)
+            for idx, pos in enumerate(path):
+                remaining_cost = path_length - 1 - idx
+                r, c = pos
+                manh = manhattan_distance(pos, gen.goal)
+                X.append([r, c, gen.goal[0], gen.goal[1], manh, width, height])
+                y.append(remaining_cost)
+        if len(X) > 0:
+            X_arr, y_arr = np.array(X), np.array(y)
+            X_train, X_test, y_train, y_test = train_test_split(X_arr, y_arr, test_size=0.2, random_state=42)
+            self.model.fit(X_train, y_train)
+            preds = self.model.predict(X_test)
+            self.mae = mean_absolute_error(y_test, preds)
+        return self.mae
+
+# ==================== 5. STREAMLIT UI APP ====================
+st.set_page_config(page_title="AI Maze Solver", page_icon="🤖", layout="wide")
+
 st.markdown("""
     <style>
-    .main {
-        background-color: #0d1117;
-        color: #c9d1d9;
-    }
-    .stSidebar {
-        background-color: #161b22;
-    }
-    h1, h2, h3 {
-        color: #58a6ff;
-    }
-    .metric-card {
-        background-color: #21262d;
-        border: 1px solid #30363d;
-        padding: 15px;
-        border-radius: 8px;
-        text-align: center;
-    }
+    .main { background-color: #0d1117; color: #c9d1d9; }
+    .stSidebar { background-color: #161b22; }
+    h1, h2, h3 { color: #58a6ff; }
+    .metric-card { background-color: #21262d; border: 1px solid #30363d; padding: 15px; border-radius: 8px; text-align: center; }
     </style>
 """, unsafe_allow_html=True)
 
-# Initialize Session State for Maze persistence across tabs
-if "maze_gen" not in st.session_state:
+if "generator" not in st.session_state:
     st.session_state.width = 15
     st.session_state.height = 15
     st.session_state.generator = MazeGenerator(width=15, height=15)
     st.session_state.grid = st.session_state.generator.generate_random_maze(wall_probability=0.25)
     st.session_state.ml_model = None
 
-# Sidebar Navigation
 st.sidebar.title("🤖 AI Maze Solver")
 st.sidebar.markdown("---")
-page = st.sidebar.radio(
-    "Navigation",
-    ["Home", "Maze Generator", "Solve Maze", "Algorithm Comparison", "Machine Learning"]
-)
+page = st.sidebar.radio("Navigation", ["Home", "Maze Generator", "Solve Maze", "Algorithm Comparison", "Machine Learning"])
 
 if page == "Home":
     st.title("🧠 AI Maze Solver & Pathfinding Game")
-    st.markdown("### University Artificial Intelligence Project (9-Student Team)")
-    
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        st.write("""
-        Welcome to our interactive AI pathfinding application! This tool demonstrates how classical search agents and machine learning heuristics navigate complex environments.
-        
-        ### 🚀 Key Features:
-        - **Classical Search**: BFS, UCS, A* Search (Manhattan), and Weighted A*.
-        - **Machine Learning Integration**: Decision Tree Regressor trained to predict heuristic distances.
-        - **Interactive Grid**: Custom start, goal, walls, and weighted terrain.
-        - **Visual Analytics**: Compare explored nodes, path costs, and execution times instantly.
-        """)
-        if st.button("🚀 Generate Maze & Start", type="primary"):
-            st.success("Switch to the 'Maze Generator' or 'Solve Maze' tabs using the sidebar!")
-            
-    with col2:
-        st.markdown("""
-        <div class="metric-card">
-            <h3>Project Status</h3>
-            <p style="color: #3fb950; font-weight: bold;">Fully Operational</p>
-            <p>All core modules and UI components linked successfully.</p>
-        </div>
-        """, unsafe_allow_html=True)
+    st.markdown("### University Artificial Intelligence Project")
+    st.write("Welcome! Use the sidebar navigation to generate mazes, test AI search algorithms (BFS, UCS, A*, Weighted A*), and evaluate the machine learning heuristic model.")
 
 elif page == "Maze Generator":
     st.title("🗺️ Maze Generator & Configuration")
+    w = st.slider("Width", 5, 25, st.session_state.width)
+    h = st.slider("Height", 5, 25, st.session_state.height)
+    wall_p = st.slider("Wall Density", 0.1, 0.4, 0.25)
     
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        width = st.slider("Width", 5, 25, st.session_state.width)
-        height = st.slider("Height", 5, 25, st.session_state.height)
-        wall_prob = st.slider("Wall Density", 0.1, 0.4, 0.25)
+    if st.button("Generate New Maze", type="primary"):
+        st.session_state.width = w
+        st.session_state.height = h
+        st.session_state.generator = MazeGenerator(width=w, height=h)
+        st.session_state.grid = st.session_state.generator.generate_random_maze(wall_probability=wall_p)
+        st.success("New maze generated!")
         
-        if st.button("Generate New Maze", type="primary"):
-            st.session_state.width = width
-            st.session_state.height = height
-            st.session_state.generator = MazeGenerator(width=width, height=height)
-            st.session_state.grid = st.session_state.generator.generate_random_maze(wall_probability=wall_prob)
-            st.success("New random maze generated!")
-            
-    with col2:
-        st.subheader("Current Maze Grid Preview")
-        fig = render_maze_grid(st.session_state.grid)
-        st.pyplot(fig)
+    fig = render_maze_grid(st.session_state.grid)
+    st.pyplot(fig)
 
 elif page == "Solve Maze":
     st.title("⚡ Solve Maze with AI Algorithms")
-    
-    col1, col2 = st.columns([1, 2])
-    
-    with col1:
-        algorithm = st.selectbox(
-            "Choose Search Algorithm",
-            ["Breadth-First Search (BFS)", "Uniform Cost Search (UCS)", "A* Search", "Weighted A*"]
-        )
-        weight = 1.5
-        if algorithm == "Weighted A*":
-            weight = st.slider("Heuristic Weight (w)", 1.0, 5.0, 1.5)
-            
-        run_btn = st.button("Run Algorithm", type="primary")
+    algo = st.selectbox("Choose Algorithm", ["BFS", "UCS", "A*", "Weighted A*"])
+    weight = 1.5
+    if algo == "Weighted A*":
+        weight = st.slider("Weight (w)", 1.0, 5.0, 1.5)
         
-    with col2:
+    if st.button("Run Algorithm", type="primary"):
         grid = st.session_state.grid
         start = st.session_state.generator.start
         goal = st.session_state.generator.goal
         
-        if run_btn:
-            start_time = time.time()
-            if algorithm == "Breadth-First Search (BFS)":
-                res = bfs(grid, start, goal)
-            elif algorithm == "Uniform Cost Search (UCS)":
-                res = ucs(grid, start, goal)
-            elif algorithm == "A* Search":
-                res = astar(grid, start, goal)
-            else:
-                res = weighted_astar(grid, start, goal, weight=weight)
-            exec_time = (time.time() - start_time) * 1000
-            
-            if res["success"]:
-                st.success(f"Solution found in {exec_time:.2f} ms!")
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Path Cost", res["path_cost"])
-                c2.metric("Explored Nodes", len(res["explored_nodes"]))
-                c3.metric("Execution Time", f"{exec_time:.1f} ms")
-                
-                fig = render_maze_grid(grid, path=res["path"], explored=res["explored_nodes"])
-                st.pyplot(fig)
-            else:
-                st.error("No path found to the goal!")
-                fig = render_maze_grid(grid, explored=res["explored_nodes"])
-                st.pyplot(fig)
-        else:
-            fig = render_maze_grid(grid)
+        t0 = time.time()
+        if algo == "BFS": res = bfs(grid, start, goal)
+        elif algo == "UCS": res = ucs(grid, start, goal)
+        elif algo == "A*": res = astar(grid, start, goal)
+        else: res = weighted_astar(grid, start, goal, weight=weight)
+        t_exec = (time.time() - t0) * 1000
+        
+        if res["success"]:
+            st.success(f"Path found in {t_exec:.2f} ms!")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Path Cost", res["path_cost"])
+            c2.metric("Explored Nodes", len(res["explored_nodes"]))
+            c3.metric("Time", f"{t_exec:.1f} ms")
+            fig = render_maze_grid(grid, path=res["path"], explored=res["explored_nodes"])
             st.pyplot(fig)
+        else:
+            st.error("No path found!")
+    else:
+        fig = render_maze_grid(st.session_state.grid)
+        st.pyplot(fig)
 
 elif page == "Algorithm Comparison":
-    st.title("📊 Algorithm Performance Comparison")
-    st.write("Compare all implemented search algorithms side-by-side on the current maze.")
-    
-    if st.button("Run Full Comparison", type="primary"):
+    st.title("📊 Algorithm Comparison")
+    if st.button("Run Comparison", type="primary"):
         grid = st.session_state.grid
         start = st.session_state.generator.start
         goal = st.session_state.generator.goal
-        
         algos = {
             "BFS": bfs(grid, start, goal),
             "UCS": ucs(grid, start, goal),
             "A*": astar(grid, start, goal),
             "Weighted A*": weighted_astar(grid, start, goal, weight=2.0)
         }
-        
         import pandas as pd
-        data = []
-        for name, res in algos.items():
-            data.append({
-                "Algorithm": name,
-                "Success": res["success"],
-                "Path Cost": res["path_cost"],
-                "Explored Nodes": len(res["explored_nodes"]),
-            })
+        data = [{"Algorithm": k, "Success": v["success"], "Path Cost": v["path_cost"], "Explored Nodes": len(v["explored_nodes"])} for k, v in algos.items()]
         df = pd.DataFrame(data)
         st.dataframe(df, use_container_width=True)
-        st.bar_chart(df.set_index("Algorithm")[["Explored Nodes", "Path Cost"]])
 
 elif page == "Machine Learning":
     st.title("🤖 Machine Learning Heuristic Component")
-    st.write("Train a Scikit-learn Decision Tree Regressor to predict remaining path distances.")
-    
     if st.button("Train ML Model Now", type="primary"):
-        with st.spinner("Training Decision Tree on generated maze datasets..."):
-            model = MazeHeuristicModel()
-            mae = model.train()
-            st.session_state.ml_model = model
-            st.success(f"Model trained successfully! Test Mean Absolute Error (MAE): {mae:.4f}")
-            
-    if st.session_state.ml_model is not None:
-        st.info("The ML model is active and ready to guide heuristic estimations.")
+        with st.spinner("Training Decision Tree model..."):
+            ml = MazeHeuristicModel()
+            mae = ml.train()
+            st.session_state.ml_model = ml
+            st.success(f"Trained successfully! MAE: {mae:.4f}")
+    if st.session_state.ml_model:
         st.metric("Model MAE", f"{st.session_state.ml_model.mae:.4f}")
     else:
-        st.warning("Click the button above to train and initialize the model.")
+        st.warning("Click above to train the model.")
+ 
