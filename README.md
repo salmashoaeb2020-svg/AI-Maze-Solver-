@@ -1,2 +1,16 @@
 # AI-Maze-Solver-
 🤖 Interactive AI pathfinding game showcasing search algorithms (BFS, UCS, A*), ML heuristics, and Streamlit UI.
+# AI Maze Solver – Intelligent Pathfinding Game
+
+An interactive, educational AI pathfinding game built with Python and Streamlit for university students and AI enthusiasts.
+
+## Features
+- **Multiple Search Algorithms**: BFS, UCS, A* Search, and Weighted A*.
+- **Machine Learning Integration**: Decision Tree Regressor for heuristic guidance.
+- **Optimization**: Hill Climbing for heuristic weight tuning.
+- **Interactive Visualization**: Step-by-step animation and real-time dashboard cards.
+
+## Running Locally
+1. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
