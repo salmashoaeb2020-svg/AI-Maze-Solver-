@@ -1,15 +1,13 @@
-import sys
-import os
-current_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(current_dir)
 import streamlit as st
 import numpy as np
 import time
 import sys
 import os
 
-# ضبط مسار المشروع الأساسي لضمان عمل الاستيرادات على Streamlit Cloud
-sys.path.append(os.path.abspath('.'))
+# إضافة مسار المشروع الحالي لبيئة بايثون
+ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+if ROOT_DIR not in sys.path:
+    sys.path.append(ROOT_DIR)
 
 from maze.maze_generator import MazeGenerator
 from algorithms.bfs import bfs
