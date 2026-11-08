@@ -14,20 +14,26 @@ class MazeGenerator:
         self.width = width
         self.height = height
         self.start = (0, 0)
-        self.goal = (height - 1, width - 1)  # تم تعديلها لتطابق الأبعاد الصحيحة للشبكة
+        self.goal = (height - 1, width - 1)
 
     def generate_random_maze(self, wall_probability=0.25):
-        self.goal = (self.height - 1, self.width - 1) # تحديث الإحداثيات مع كل توليد
+        self.goal = (self.height - 1, self.width - 1)
         grid = np.zeros((self.height, self.width), dtype=int)
         for r in range(self.height):
             for c in range(self.width):
+                # نترك البداية والنهاية ومحيطهم خاليين عشان نضمن إن المتاهة قابلة للحل دايماً
                 if (r, c) == self.start or (r, c) == self.goal:
+                    continue
+                if (r, c) in [(0, 1), (1, 0), (self.height-1, self.width-2), (self.height-2, self.width-1)]:
                     continue
                 if random.random() < wall_probability:
                     grid[r][c] = 1  # Wall
         grid[self.start[0]][self.start[1]] = 0
         grid[self.goal[0]][self.goal[1]] = 0
         return grid
+
+def manhattan_distance(pos, goal):
+    return abs(pos[0] - goal[0]) + abs(pos[1] - goal[1])
 
 # ==================== 2. SEARCH ALGORITHMS ====================
 def get_neighbors(grid, node):
@@ -116,7 +122,6 @@ def render_maze_grid(grid, path=None, explored=None):
         for r, c in path:
             cmap_grid[r][c] = 0.3  # Path color
             
-    # Start and Goal markers
     start_pos = (0, 0)
     goal_pos = (grid.shape[1] - 1, grid.shape[0] - 1)
     cmap_grid[start_pos[1]][start_pos[0]] = 0.2
@@ -169,9 +174,12 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-if "generator" not in st.session_state:
+# التهيئة والتحديث الديناميكي للأبعاد
+if "width" not in st.session_state:
     st.session_state.width = 15
+if "height" not in st.session_state:
     st.session_state.height = 15
+if "generator" not in st.session_state:
     st.session_state.generator = MazeGenerator(width=15, height=15)
     st.session_state.grid = st.session_state.generator.generate_random_maze(wall_probability=0.25)
     st.session_state.ml_model = None
@@ -191,12 +199,13 @@ elif page == "Maze Generator":
     h = st.slider("Height", 5, 25, st.session_state.height)
     wall_p = st.slider("Wall Density", 0.1, 0.4, 0.25)
     
-    if st.button("Generate New Maze", type="primary"):
+    # تحديث الأبعاد وتوليد المتاهة فور تغيير العرض أو الارتفاع أو الضغط على الزر
+    if w != st.session_state.width or h != st.session_state.height or st.button("Generate New Maze", type="primary"):
         st.session_state.width = w
         st.session_state.height = h
         st.session_state.generator = MazeGenerator(width=w, height=h)
         st.session_state.grid = st.session_state.generator.generate_random_maze(wall_probability=wall_p)
-        st.success("New maze generated!")
+        st.success("Maze updated successfully!")
         
     fig = render_maze_grid(st.session_state.grid)
     st.pyplot(fig)
@@ -229,7 +238,9 @@ elif page == "Solve Maze":
             fig = render_maze_grid(grid, path=res["path"], explored=res["explored_nodes"])
             st.pyplot(fig)
         else:
-            st.error("No path found!")
+            st.error("No path found! Try generating a maze with lower wall density.")
+            fig = render_maze_grid(grid, explored=res["explored_nodes"])
+            st.pyplot(fig)
     else:
         fig = render_maze_grid(st.session_state.grid)
         st.pyplot(fig)
@@ -263,4 +274,3 @@ elif page == "Machine Learning":
         st.metric("Model MAE", f"{st.session_state.ml_model.mae:.4f}")
     else:
         st.warning("Click above to train the model.")
- 
