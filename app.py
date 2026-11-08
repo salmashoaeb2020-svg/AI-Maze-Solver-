@@ -1,13 +1,23 @@
+import streamlit as st
+import numpy as np
+import time
 import sys
 import os
-sys.path.append(os.path.abspath(os.path.dirname(__file__)))
-import streamlit as st
-import os
+
+# ضبط مسار المشروع الأساسي لضمان عمل الاستيرادات على Streamlit Cloud
+sys.path.append(os.path.abspath('.'))
+
 from maze.maze_generator import MazeGenerator
+from algorithms.bfs import bfs
+from algorithms.ucs import ucs
+from algorithms.astar import astar
+from algorithms.weighted_astar import weighted_astar
+from visualization.visualization import render_maze_grid
+from machine_learning.ml_model import MazeHeuristicModel
 
 # Page Configuration
 st.set_page_config(
-    page_title="AI Maze Solver",
+    page_title="AI Maze Solver - University Project",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -36,55 +46,162 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# Initialize Session State for Maze persistence across tabs
+if "maze_gen" not in st.session_state:
+    st.session_state.width = 15
+    st.session_state.height = 15
+    st.session_state.generator = MazeGenerator(width=15, height=15)
+    st.session_state.grid = st.session_state.generator.generate_random_maze(wall_probability=0.25)
+    st.session_state.ml_model = None
+
 # Sidebar Navigation
 st.sidebar.title("🤖 AI Maze Solver")
 st.sidebar.markdown("---")
 page = st.sidebar.radio(
     "Navigation",
-    ["Home", "Maze Generator", "Solve Maze", "Algorithm Comparison", "Machine Learning", "Optimization", "Performance Dashboard"]
+    ["Home", "Maze Generator", "Solve Maze", "Algorithm Comparison", "Machine Learning"]
 )
 
 if page == "Home":
-    st.title("🧠 AI Maze Solver: Intelligent Pathfinding Game")
-    st.markdown("### Developed by University AI Team (9 Students)")
+    st.title("🧠 AI Maze Solver & Pathfinding Game")
+    st.markdown("### University Artificial Intelligence Project (9-Student Team)")
     
     col1, col2 = st.columns([2, 1])
     with col1:
         st.write("""
-        Welcome to the **AI Maze Solver**, a modern educational application designed to demonstrate, analyze, and compare classical and advanced Artificial Intelligence search algorithms.
+        Welcome to our interactive AI pathfinding application! This tool demonstrates how classical search agents and machine learning heuristics navigate complex environments.
         
-        ### 🚀 What You Can Do:
-        - **Generate & Customize**: Create random mazes, set start/goal nodes, and paint obstacles or weighted terrain.
-        - **Explore Algorithms**: Watch **BFS**, **UCS**, **A* Search**, and **Weighted A*** explore step by step.
-        - **Machine Learning Integration**: Observe how a **Decision Tree Regressor** guides search heuristics.
-        - **Optimization**: Use **Hill Climbing** to optimize heuristic weights automatically.
+        ### 🚀 Key Features:
+        - **Classical Search**: BFS, UCS, A* Search (Manhattan), and Weighted A*.
+        - **Machine Learning Integration**: Decision Tree Regressor trained to predict heuristic distances.
+        - **Interactive Grid**: Custom start, goal, walls, and weighted terrain.
+        - **Visual Analytics**: Compare explored nodes, path costs, and execution times instantly.
         """)
-        if st.button("Start Exploring -> Go to Maze Generator", type="primary"):
-            st.info("Use the sidebar navigation to switch to 'Maze Generator'.")
+        if st.button("🚀 Generate Maze & Start", type="primary"):
+            st.success("Switch to the 'Maze Generator' or 'Solve Maze' tabs using the sidebar!")
             
     with col2:
         st.markdown("""
         <div class="metric-card">
             <h3>Project Status</h3>
-            <p style="color: #3fb950; font-weight: bold;">Stage 1: Architecture & Generator Ready</p>
-            <p>Modular Python backend configured successfully.</p>
+            <p style="color: #3fb950; font-weight: bold;">Fully Operational</p>
+            <p>All core modules and UI components linked successfully.</p>
         </div>
         """, unsafe_allow_html=True)
 
 elif page == "Maze Generator":
     st.title("🗺️ Maze Generator & Configuration")
-    st.write("Configure your maze dimensions and generate a random layout.")
     
-    width = st.slider("Maze Width", 5, 30, 15)
-    height = st.slider("Maze Height", 5, 30, 15)
-    wall_prob = st.slider("Wall Density", 0.0, 0.5, 0.25)
-    
-    if st.button("Generate New Maze"):
-        generator = MazeGenerator(width, height)
-        grid = generator.generate_random_maze(wall_probability=wall_prob)
-        st.success("Maze generated successfully!")
-        st.write(grid)
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        width = st.slider("Width", 5, 25, st.session_state.width)
+        height = st.slider("Height", 5, 25, st.session_state.height)
+        wall_prob = st.slider("Wall Density", 0.1, 0.4, 0.25)
+        
+        if st.button("Generate New Maze", type="primary"):
+            st.session_state.width = width
+            st.session_state.height = height
+            st.session_state.generator = MazeGenerator(width=width, height=height)
+            st.session_state.grid = st.session_state.generator.generate_random_maze(wall_probability=wall_prob)
+            st.success("New random maze generated!")
+            
+    with col2:
+        st.subheader("Current Maze Grid Preview")
+        fig = render_maze_grid(st.session_state.grid)
+        st.pyplot(fig)
 
-else:
-    st.title(f"📍 {page}")
-    st.info(f"The module for **{page}** will be integrated in subsequent stages.")
+elif page == "Solve Maze":
+    st.title("⚡ Solve Maze with AI Algorithms")
+    
+    col1, col2 = st.columns([1, 2])
+    
+    with col1:
+        algorithm = st.selectbox(
+            "Choose Search Algorithm",
+            ["Breadth-First Search (BFS)", "Uniform Cost Search (UCS)", "A* Search", "Weighted A*"]
+        )
+        weight = 1.5
+        if algorithm == "Weighted A*":
+            weight = st.slider("Heuristic Weight (w)", 1.0, 5.0, 1.5)
+            
+        run_btn = st.button("Run Algorithm", type="primary")
+        
+    with col2:
+        grid = st.session_state.grid
+        start = st.session_state.generator.start
+        goal = st.session_state.generator.goal
+        
+        if run_btn:
+            start_time = time.time()
+            if algorithm == "Breadth-First Search (BFS)":
+                res = bfs(grid, start, goal)
+            elif algorithm == "Uniform Cost Search (UCS)":
+                res = ucs(grid, start, goal)
+            elif algorithm == "A* Search":
+                res = astar(grid, start, goal)
+            else:
+                res = weighted_astar(grid, start, goal, weight=weight)
+            exec_time = (time.time() - start_time) * 1000
+            
+            if res["success"]:
+                st.success(f"Solution found in {exec_time:.2f} ms!")
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Path Cost", res["path_cost"])
+                c2.metric("Explored Nodes", len(res["explored_nodes"]))
+                c3.metric("Execution Time", f"{exec_time:.1f} ms")
+                
+                fig = render_maze_grid(grid, path=res["path"], explored=res["explored_nodes"])
+                st.pyplot(fig)
+            else:
+                st.error("No path found to the goal!")
+                fig = render_maze_grid(grid, explored=res["explored_nodes"])
+                st.pyplot(fig)
+        else:
+            fig = render_maze_grid(grid)
+            st.pyplot(fig)
+
+elif page == "Algorithm Comparison":
+    st.title("📊 Algorithm Performance Comparison")
+    st.write("Compare all implemented search algorithms side-by-side on the current maze.")
+    
+    if st.button("Run Full Comparison", type="primary"):
+        grid = st.session_state.grid
+        start = st.session_state.generator.start
+        goal = st.session_state.generator.goal
+        
+        algos = {
+            "BFS": bfs(grid, start, goal),
+            "UCS": ucs(grid, start, goal),
+            "A*": astar(grid, start, goal),
+            "Weighted A*": weighted_astar(grid, start, goal, weight=2.0)
+        }
+        
+        import pandas as pd
+        data = []
+        for name, res in algos.items():
+            data.append({
+                "Algorithm": name,
+                "Success": res["success"],
+                "Path Cost": res["path_cost"],
+                "Explored Nodes": len(res["explored_nodes"]),
+            })
+        df = pd.DataFrame(data)
+        st.dataframe(df, use_container_width=True)
+        st.bar_chart(df.set_index("Algorithm")[["Explored Nodes", "Path Cost"]])
+
+elif page == "Machine Learning":
+    st.title("🤖 Machine Learning Heuristic Component")
+    st.write("Train a Scikit-learn Decision Tree Regressor to predict remaining path distances.")
+    
+    if st.button("Train ML Model Now", type="primary"):
+        with st.spinner("Training Decision Tree on generated maze datasets..."):
+            model = MazeHeuristicModel()
+            mae = model.train()
+            st.session_state.ml_model = model
+            st.success(f"Model trained successfully! Test Mean Absolute Error (MAE): {mae:.4f}")
+            
+    if st.session_state.ml_model is not None:
+        st.info("The ML model is active and ready to guide heuristic estimations.")
+        st.metric("Model MAE", f"{st.session_state.ml_model.mae:.4f}")
+    else:
+        st.warning("Click the button above to train and initialize the model.")
