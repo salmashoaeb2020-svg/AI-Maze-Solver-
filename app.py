@@ -14,9 +14,10 @@ class MazeGenerator:
         self.width = width
         self.height = height
         self.start = (0, 0)
-        self.goal = (width - 1, height - 1)
+        self.goal = (height - 1, width - 1)  # تم تعديلها لتطابق الأبعاد الصحيحة للشبكة
 
     def generate_random_maze(self, wall_probability=0.25):
+        self.goal = (self.height - 1, self.width - 1) # تحديث الإحداثيات مع كل توليد
         grid = np.zeros((self.height, self.width), dtype=int)
         for r in range(self.height):
             for c in range(self.width):
@@ -27,9 +28,6 @@ class MazeGenerator:
         grid[self.start[0]][self.start[1]] = 0
         grid[self.goal[0]][self.goal[1]] = 0
         return grid
-
-def manhattan_distance(pos, goal):
-    return abs(pos[0] - goal[0]) + abs(pos[1] - goal[1])
 
 # ==================== 2. SEARCH ALGORITHMS ====================
 def get_neighbors(grid, node):
