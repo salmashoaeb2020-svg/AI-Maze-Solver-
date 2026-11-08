@@ -1,3 +1,7 @@
+import sys
+import os
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)
 import streamlit as st
 import numpy as np
 import time
